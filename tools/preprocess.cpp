@@ -109,15 +109,30 @@ void generate_edge_grid(std::string input, std::string output, VertexId vertices
 				for (long pos=0;pos<bytes;pos+=edge_unit) {
 					source = *(VertexId*)(buffer+pos);
 					target = *(VertexId*)(buffer+pos+sizeof(VertexId));
+					//printf("source:%d\n",source);
+					//printf("target:%d\n",target);
 					int i = get_partition_id(vertices, partitions, source);
 					int j = get_partition_id(vertices, partitions, target);
+					if(i>partitions||j>partitions){
+						printf("parition_id from source=>%d is %d from target=>%d is %d, one of them exceed partition boundary!\n",source,i,target,j);
+						exit(-1);
+					}
+					//printf("\ni:%d\n",i);
+					//printf("\nj:%d\n",j);
 					local_grid_offset[i*partitions+j] += edge_unit;
 				}
 				local_grid_cursor[0] = 0;
+				for (int ccy=0;ccy<partitions*partitions;ccy++){
+					printf("partitions_id:%d offset_value:%d\n",ccy, local_grid_offset[ccy]);
+				}
+				//printf("\n");
+				//printf("part*part:%d\n",partitions*partitions);
 				for (int ij=1;ij<partitions*partitions;ij++) {
+					//printf("ij:%lu\n",ij);
 					local_grid_cursor[ij] = local_grid_offset[ij - 1];
 					local_grid_offset[ij] += local_grid_cursor[ij];
 				}
+				printf("partitions:%d local_grid_offset[part*part-1]:%d bytes:%ld\n",partitions,local_grid_offset[partitions*partitions-1],bytes);
 				assert(local_grid_offset[partitions*partitions-1]==bytes);
 				for (long pos=0;pos<bytes;pos+=edge_unit) {
 					source = *(VertexId*)(buffer+pos);

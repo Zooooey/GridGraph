@@ -270,7 +270,7 @@ public:
 		}
 
 		T value = zero;
-		Queue<std::tuple<int, long, long> > tasks(65536);
+		Queue<std::tuple<void*, long, long> > tasks(65536);
 		std::vector<std::thread> threads;
 		long read_bytes = 0;
 
@@ -293,20 +293,22 @@ public:
 		int fin;
 		long offset = 0;
 		switch(update_mode) {
-		case 0: // source oriented update
-			threads.clear();
-			for (int ti=0;ti<parallelism;ti++) {
-				threads.emplace_back([&](int thread_id){
-					T local_value = zero;
-					long local_read_bytes = 0;
-					while (true) {
-						int fin;
+				case 0: // source oriented update
+						threads.clear();
+						for (int ti=0;ti<parallelism;ti++) {
+								threads.emplace_back([&](int thread_id){
+												T local_value = zero;
+												long local_read_bytes = 0;
+												while (true) {
+						void* mmap_start;
 						long offset, length;
-						std::tie(fin, offset, length) = tasks.pop();
-						if (fin==-1) break;
+						std::tie(mmap_start, offset, length) = tasks.pop();
+						if (mmap_start==MAP_FAILED) break;
 						char * buffer = buffer_pool[thread_id];
-						long bytes = pread(fin, buffer, length, offset);
-						assert(bytes>0);
+						//long bytes = pread(mmap_start, buffer, length, offset);
+						long bytes = length;
+						memcpy(buffer, mmap_start+offset, length);
+						//assert(bytes>0);
 						local_read_bytes += bytes;
 						// CHECK: start position should be offset % edge_unit
 						for (long pos=offset % edge_unit;pos+edge_unit<=bytes;pos+=edge_unit) {
@@ -321,28 +323,47 @@ public:
 				}, ti);
 			}
 			fin = open((path+"/row").c_str(), read_mode);
-			posix_fadvise(fin, 0, 0, POSIX_FADV_SEQUENTIAL);
-			for (int i=0;i<partitions;i++) {
-				if (!should_access_shard[i]) continue;
-				for (int j=0;j<partitions;j++) {
-					long begin_offset = row_offset[i*partitions+j];
-					if (begin_offset - offset >= PAGESIZE) {
-						offset = begin_offset / PAGESIZE * PAGESIZE;
+			void* mmap_start = MAP_FAILED;
+			if(fin!=-1){
+					struct stat s;
+					int status = fstat(fin, &s);
+					if(status!=0){
+							printf("Value of errno: %d\n", errno);
+							printf("Error state the file: %s\n", strerror(errno));
+							return -1;
 					}
-					long end_offset = row_offset[i*partitions+j+1];
+					size_t size = s.st_size;
+					//posix_fadvise(fin, 0, 0, POSIX_FADV_SEQUENTIAL);
+					mmap_start = mmap(0, size, PROT_READ, MAP_PRIVATE, fin, 0);
+					if(mmap_start == MAP_FAILED){
+							printf("mmap failed!\n");
+							printf("Value of errno: %d\n", errno);
+							printf("Error mapping the file: %s\n", strerror(errno));
+							return -1;
+					}
+			}
+
+			for (int i=0;i<partitions;i++) {
+					if (!should_access_shard[i]) continue;
+					for (int j=0;j<partitions;j++) {
+							long begin_offset = row_offset[i*partitions+j];
+							if (begin_offset - offset >= PAGESIZE) {
+									offset = begin_offset / PAGESIZE * PAGESIZE;
+							}
+							long end_offset = row_offset[i*partitions+j+1];
 					if (end_offset <= offset) continue;
 					while (end_offset - offset >= IOSIZE) {
-						tasks.push(std::make_tuple(fin, offset, IOSIZE));
+						tasks.push(std::make_tuple(mmap_start, offset, IOSIZE));
 						offset += IOSIZE;
 					}
 					if (end_offset > offset) {
-						tasks.push(std::make_tuple(fin, offset, (end_offset - offset + PAGESIZE - 1) / PAGESIZE * PAGESIZE));
+						tasks.push(std::make_tuple(mmap_start, offset, (end_offset - offset + PAGESIZE - 1) / PAGESIZE * PAGESIZE));
 						offset += (end_offset - offset + PAGESIZE - 1) / PAGESIZE * PAGESIZE;
 					}
 				}
 			}
 			for (int i=0;i<parallelism;i++) {
-				tasks.push(std::make_tuple(-1, 0, 0));
+				tasks.push(std::make_tuple(MAP_FAILED, 0, 0));
 			}
 			for (int i=0;i<parallelism;i++) {
 				threads[i].join();
@@ -350,7 +371,26 @@ public:
 			break;
 		case 1: // target oriented update
 			fin = open((path+"/column").c_str(), read_mode);
-			posix_fadvise(fin, 0, 0, POSIX_FADV_SEQUENTIAL);
+			//posix_fadvise(fin, 0, 0, POSIX_FADV_SEQUENTIAL);
+			mmap_start = MAP_FAILED;
+			if(fin!=-1){
+					struct stat s;
+					int status = fstat(fin, &s);
+					if(status!=0){
+							printf("Value of errno: %d\n", errno);
+							printf("Error state the file: %s\n", strerror(errno));
+							return -1;
+					}
+					size_t size = s.st_size;
+					//posix_fadvise(fin, 0, 0, POSIX_FADV_SEQUENTIAL);
+					mmap_start = mmap(0, size, PROT_READ, MAP_PRIVATE, fin, 0);
+					if(mmap_start == MAP_FAILED){
+							printf("mmap failed!\n");
+							printf("Value of errno: %d\n", errno);
+							printf("Error mapping the file: %s\n", strerror(errno));
+							return -1;
+					}
+			}
 
 			for (int cur_partition=0;cur_partition<partitions;cur_partition+=partition_batch) {
 				VertexId begin_vid, end_vid;
@@ -368,13 +408,16 @@ public:
 						T local_value = zero;
 						long local_read_bytes = 0;
 						while (true) {
-							int fin;
+							//int fin;
+							void* mmap_start;
 							long offset, length;
-							std::tie(fin, offset, length) = tasks.pop();
-							if (fin==-1) break;
+							std::tie(mmap_start, offset, length) = tasks.pop();
+							if (mmap_start==MAP_FAILED) break;
 							char * buffer = buffer_pool[thread_id];
-							long bytes = pread(fin, buffer, length, offset);
-							assert(bytes>0);
+							//long bytes = pread(mmap_start, buffer, length, offset);
+							long bytes = length;
+							memcpy(buffer, mmap_start+offset, length);
+							//assert(bytes>0);
 							local_read_bytes += bytes;
 							// CHECK: start position should be offset % edge_unit
 							for (long pos=offset % edge_unit;pos+edge_unit<=bytes;pos+=edge_unit) {
@@ -403,17 +446,17 @@ public:
 						long end_offset = column_offset[j*partitions+i+1];
 						if (end_offset <= offset) continue;
 						while (end_offset - offset >= IOSIZE) {
-							tasks.push(std::make_tuple(fin, offset, IOSIZE));
+							tasks.push(std::make_tuple(mmap_start, offset, IOSIZE));
 							offset += IOSIZE;
 						}
 						if (end_offset > offset) {
-							tasks.push(std::make_tuple(fin, offset, (end_offset - offset + PAGESIZE - 1) / PAGESIZE * PAGESIZE));
+							tasks.push(std::make_tuple(mmap_start, offset, (end_offset - offset + PAGESIZE - 1) / PAGESIZE * PAGESIZE));
 							offset += (end_offset - offset + PAGESIZE - 1) / PAGESIZE * PAGESIZE;
 						}
 					}
 				}
 				for (int i=0;i<parallelism;i++) {
-					tasks.push(std::make_tuple(-1, 0, 0));
+					tasks.push(std::make_tuple(MAP_FAILED, 0, 0));
 				}
 				for (int i=0;i<parallelism;i++) {
 					threads[i].join();
