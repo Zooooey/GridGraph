@@ -26,12 +26,15 @@ int main(int argc, char ** argv) {
 	long memory_bytes = (argc>=4)?atol(argv[3])*1024l*1024l*1024l:8l*1024l*1024l*1024l;
 
 	Graph graph(path);
+	//这个set_memory_bytes仅仅设置了Graph成员变量的一个long而已。
 	graph.set_memory_bytes(memory_bytes);
+	//这里分配了两个bitmap
 	Bitmap * active_in = graph.alloc_bitmap();
 	Bitmap * active_out = graph.alloc_bitmap();
 	BigVector<VertexId> parent(graph.path+"/parent", graph.vertices);
 	graph.set_vertex_data_bytes( graph.vertices * sizeof(VertexId) );
 
+	//这里在初始化bitmap还有parent
 	active_out->clear();
 	active_out->set_bit(start_vid);
 	parent.fill(-1);
@@ -45,6 +48,7 @@ int main(int argc, char ** argv) {
 		printf("%7d: %d\n", iteration, active_vertices);
 		std::swap(active_in, active_out);
 		active_out->clear();
+		//这个graph.hint传的是parent，最后会让Graph里的partition_batch的长度等于parent文件字节大小。
 		graph.hint(parent);
 		active_vertices = graph.stream_edges<VertexId>([&](Edge & e){
 			if (parent[e.target]==-1) {

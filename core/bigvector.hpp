@@ -29,6 +29,11 @@ Copyright (c) 2014-2015 Xiaowei Zhu, Tsinghua University
 #include "core/partition.hpp"
 
 template <typename T>
+/**
+ * @brief 
+ * BigVector是一个围绕文件建立的连续缓冲区。文件本身用mmap进行优化，其次会针对文件的某个连续空间做memory缓存。当调用BigVector的save函数后，这部分连续memory会被写入文件，并释放内存。而如果调用load，则重新申请一块内存，把对应区域文件内容存入对应的memory里。
+ * 
+ */
 class BigVector {
 	std::string path;
 	bool is_open;
@@ -92,6 +97,7 @@ public:
 	void open_mmap() {
 		int ret = posix_fadvise(fd, 0, 0, POSIX_FADV_SEQUENTIAL);
 		assert(ret==0);
+		//[内存_mmap]这里创建了一个内存区域，长度是sizeof(T) * length,mmap给对应打开的文件
 		data = (T *)mmap(NULL, sizeof(T) * length, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
 		assert(data!=MAP_FAILED);
 		is_open = true;

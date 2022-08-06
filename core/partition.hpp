@@ -26,9 +26,18 @@ inline size_t get_partition_id(const size_t vertices, const size_t partitions, c
         const size_t split_point = vertices % partitions * partition_size;
         return (vertex_id < split_point) ? vertex_id / partition_size : (vertex_id - split_point) / (partition_size - 1) + (vertices % partitions);
 }
-
+/**
+ * @brief 根据partition_id，返回这个partition里的vertex_id区间，返回值里包含begin_vertex和end_vertex
+ * 
+ * @param vertices 整个Graph里vertex的总数
+ * @param partitions 本次GridGraph里划分的partitions数量
+ * @param partition_id 指定一个partition_id
+ * @return std::pair<size_t, size_t> 
+ */
 inline std::pair<size_t, size_t> get_partition_range(const size_t vertices, const size_t partitions, const size_t partition_id) {
+        //vertices是vertex的总数量
         const size_t split_partition = vertices % partitions;
+        //partition_size是指一个paritions里有几个vertex
         const size_t partition_size = vertices / partitions + 1;
         if (partition_id < split_partition) {
                 const size_t begin = partition_id * partition_size;
