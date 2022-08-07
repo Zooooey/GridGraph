@@ -314,6 +314,7 @@ public:
 			{
 				should_access_shard[i] = false;
 			}
+			//这里用并发的手段确定哪些partition需要访问，哪些不需要，确定的依据是bitmap
 #pragma omp parallel for schedule(dynamic) num_threads(parallelism)
 			for (int partition_id = 0; partition_id < partitions; partition_id++)
 			{
@@ -325,6 +326,7 @@ public:
 					unsigned long word = bitmap->data[WORD_OFFSET(i)];
 					if (word != 0)
 					{
+						//需要访问的partition用一个bool数组记录。
 						should_access_shard[partition_id] = true;
 						break;
 					}
@@ -342,6 +344,7 @@ public:
 		long total_bytes = 0;
 		for (int i = 0; i < partitions; i++)
 		{
+			//不需要访问的partition直接跳过
 			if (!should_access_shard[i])
 				continue;
 			for (int j = 0; j < partitions; j++)
@@ -350,6 +353,7 @@ public:
 			}
 		}
 		int read_mode;
+		//图比memory_budge大，跳过page cache
 		if (memory_bytes < total_bytes)
 		{
 			read_mode = O_RDONLY | O_DIRECT;
@@ -456,6 +460,7 @@ public:
 			}
 			}
 			break;
+			//这个1是默认模式，也是bfs使用的模式
 		case 1: // target oriented update
 			{
 			fin = open((path + "/column").c_str(), read_mode);
@@ -472,6 +477,7 @@ public:
 					return -1;
 				}
 				size_t size = s.st_size;
+				//这是我们用mmap的方式改造了他原生的代码。
 				mmap_start = mmap(0, size, PROT_READ, MAP_PRIVATE, fin, 0);
 				if (mmap_start == MAP_FAILED)
 				{
@@ -481,7 +487,7 @@ public:
 					return -1;
 				}
 			}
-
+			//以batch的方式遍历partitions
 			for (int cur_partition = 0; cur_partition < partitions; cur_partition += partition_batch)
 			{
 				VertexId begin_vid, end_vid;
@@ -494,11 +500,13 @@ public:
 				{
 					end_vid = get_partition_range(vertices, partitions, cur_partition + partition_batch).first;
 				}
+				//钩子，bfs没用到。
 				pre_source_window(std::make_pair(begin_vid, end_vid));
 				// printf("pre %d %d\n", begin_vid, end_vid);
 				threads.clear();
 				for (int ti = 0; ti < parallelism; ti++)
 				{
+					//初始化n个线程
 					threads.emplace_back([&](int thread_id)
 										 {
 						T local_value = zero;
@@ -507,30 +515,37 @@ public:
 							//int fin;
 							void* mmap_start;
 							long offset, length;
+							//每个线程从tasks里取出连续内存空间的起始地址，offset和长度
 							std::tie(mmap_start, offset, length) = tasks.pop();
 							if (mmap_start==MAP_FAILED) break;
+							//每个线程有一个自己的buffer
 							char * buffer = buffer_pool[thread_id];
 							//long bytes = pread(mmap_start, buffer, length, offset);
 							long bytes = length;
+							//从文件读取相应长度的内容到线程自己的buffer里。
 							memcpy(buffer, mmap_start+offset, length);
 							//assert(bytes>0);
 							local_read_bytes += bytes;
 							// CHECK: start position should be offset % edge_unit
 							for (long pos=offset % edge_unit;pos+edge_unit<=bytes;pos+=edge_unit) {
+								//因为我们文件里组织的边列表是二进制格式的，所以只要拿到对应的地址就可以直接构造一个Edge结构出来了
 								Edge & e = *(Edge*)(buffer+pos);
 								if (e.source < begin_vid || e.source >= end_vid) {
 									continue;
 								}
+								//bitmap如果没给，肯定要处理，或者bitmap里标注了这个点需要处理，则也是调用process
 								if (bitmap==nullptr || bitmap->get_bit(e.source)) {
 									local_value += process(e);
 								}
 							}
 						}
+						//最后把运行相关结果累加起来
 						write_add(&value, local_value);
 						write_add(&read_bytes, local_read_bytes); },
 										 ti);
 				}
 				offset = 0;
+				//TODO:这里的逻辑没有细看，不过大致意思就是根据各个offset划分出对应的文件区段，然后推入到tasks这个Queue的实例里，让上面的线程从里面取出来读取文件内容。
 				for (int j = 0; j < partitions; j++)
 				{
 					for (int i = cur_partition; i < cur_partition + partition_batch; i++)
@@ -539,6 +554,8 @@ public:
 							break;
 						if (!should_access_shard[i])
 							continue;
+						//column_offset是一个long *类型，本质就是一个数组。从这里推测，是获取一个partition的column在一个Grid里的begin_offset和end_offset
+						//TODO:有时间研究下它的细节，没有就先推进
 						long begin_offset = column_offset[j * partitions + i];
 						if (begin_offset - offset >= PAGESIZE)
 						{
@@ -547,6 +564,7 @@ public:
 						long end_offset = column_offset[j * partitions + i + 1];
 						if (end_offset <= offset)
 							continue;
+						//顺着这个column遍历整个partition。
 						while (end_offset - offset >= IOSIZE)
 						{
 							tasks.push(std::make_tuple(mmap_start, offset, IOSIZE));

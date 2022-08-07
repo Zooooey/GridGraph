@@ -27,6 +27,7 @@ Copyright (c) 2014-2015 Xiaowei Zhu, Tsinghua University
 
 #include "core/filesystem.hpp"
 #include "core/partition.hpp"
+#include "core/util.hpp"
 
 template <typename T>
 /**
@@ -101,6 +102,10 @@ public:
 		data = (T *)mmap(NULL, sizeof(T) * length, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
 		assert(data!=MAP_FAILED);
 		is_open = true;
+	}
+	void print_address(const char* msg){
+		unsigned long * end_p = data+ sizeof(T) * length;
+		util::print_address(msg,(unsigned long)(void*)data,(unsigned long)(void*)end_p);
 	}
 	void close_mmap() {
 		is_open = false;

@@ -15,6 +15,7 @@ Copyright (c) 2014-2015 Xiaowei Zhu, Tsinghua University
 */
 
 #include "core/graph.hpp"
+#include "core/util.hpp"
 
 int main(int argc, char ** argv) {
 	if (argc<3) {
@@ -31,7 +32,10 @@ int main(int argc, char ** argv) {
 	//这里分配了两个bitmap
 	Bitmap * active_in = graph.alloc_bitmap();
 	Bitmap * active_out = graph.alloc_bitmap();
+	active_in->print_address();
+	active_out->print_address();
 	BigVector<VertexId> parent(graph.path+"/parent", graph.vertices);
+	parent.print_address("parent");
 	graph.set_vertex_data_bytes( graph.vertices * sizeof(VertexId) );
 
 	//这里在初始化bitmap还有parent
@@ -50,6 +54,7 @@ int main(int argc, char ** argv) {
 		active_out->clear();
 		//这个graph.hint传的是parent，最后会让Graph里的partition_batch的长度等于parent文件字节大小。
 		graph.hint(parent);
+		//这个stream_edges定义了process函数。process函数每次传入一个edge，并依据parent
 		active_vertices = graph.stream_edges<VertexId>([&](Edge & e){
 			if (parent[e.target]==-1) {
 				if (cas(&parent[e.target], -1, e.source)) {

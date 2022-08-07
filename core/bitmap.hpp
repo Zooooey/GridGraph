@@ -16,7 +16,7 @@ Copyright (c) 2014-2015 Xiaowei Zhu, Tsinghua University
 
 #ifndef BITMAP_H
 #define BITMAP_H
-
+#include "core/util.hpp"
 #define WORD_OFFSET(i) (i >> 6)
 #define BIT_OFFSET(i) (i & 0x3f)
 
@@ -34,6 +34,11 @@ public:
 	void init(size_t size) {
 		this->size = size;
 		data = new unsigned long [WORD_OFFSET(size)+1];
+		memset(data,0,sizeof(long)*(WORD_OFFSET(size)+1));
+	}
+	void print_address(){
+		unsigned long * end_p = data+WORD_OFFSET(size)+1;
+		util::print_address("Bitmap",(unsigned long)(void*)data,(unsigned long)(void*)end_p);
 	}
 	void clear() {
 		size_t bm_size = WORD_OFFSET(size);
