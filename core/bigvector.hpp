@@ -104,8 +104,8 @@ public:
 		is_open = true;
 	}
 	void print_address(const char* msg){
-		unsigned long * end_p = data+ sizeof(T) * length;
-		util::print_address(msg,(unsigned long)(void*)data,(unsigned long)(void*)end_p);
+		unsigned long end_p = (unsigned long )(void*)(data + (sizeof(T) * length));
+		util::print_address(msg,(unsigned long)(void*)data,end_p);
 	}
 	void close_mmap() {
 		is_open = false;
