@@ -182,8 +182,8 @@ public:
 			for (int cur_partition = 0; cur_partition < partitions; cur_partition += partition_batch)
 			{
 				VertexId begin_vid, end_vid;
-				if (cur_partition + partition_batch >= partitions)
 				begin_vid = get_partition_range(vertices, partitions, cur_partition).first;
+				if (cur_partition + partition_batch >= partitions)
 				{
 					end_vid = vertices;
 				}
@@ -465,7 +465,7 @@ public:
 			{
 			fin = open((path + "/column").c_str(), read_mode);
 			// posix_fadvise(fin, 0, 0, POSIX_FADV_SEQUENTIAL);
-			mmap_start = MAP_FAILED;
+			void *mmap_start = MAP_FAILED;
 			if (fin != -1)
 			{
 				struct stat s;

@@ -39,7 +39,6 @@ int util::mem_addr(unsigned long vaddr, unsigned long *paddr)
     }
 
     if (read(fd, &item, sizeof(uint64_t)) != sizeof(uint64_t)) //读取对应项的值，并存入item中，且判断读取数据位数是否正确
-
     {
         printf("read item error\n");
         return -1;
@@ -67,6 +66,14 @@ void util::print_address(const char *msg, unsigned long virt_addr, unsigned long
     printf("%s [virtual address] : [0x%lx,0x%lx]\n", msg, virt_addr,virt_end);
     unsigned long phys_start;
     unsigned long phys_end;
+    //read this virtual address to trigger page fault and build the page table.
+    char* start = (char*)virt_addr;
+    char* end = (char*)virt_end;
+    char* p = start;
+    char a ;
+    for(;p<end;p=p+4096){
+        a = *p;
+    }
     int ret1 = mem_addr(virt_addr, &phys_start);
     int ret2 = mem_addr(virt_end, &phys_end);
     if (ret1 == 0 && ret2==0)
