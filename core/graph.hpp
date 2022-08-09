@@ -63,6 +63,7 @@ class Graph
 	int partition_batch;
 	long vertex_data_bytes;
 	long PAGESIZE;
+	void *column_mmap_start;
 
 public:
 	std::string path;
@@ -153,23 +154,25 @@ public:
 		bytes = read(fin_row_offset, row_offset, sizeof(long) * (partitions * partitions + 1));
 		assert(bytes == sizeof(long) * (partitions * partitions + 1));
 		close(fin_row_offset);
+
+		column_mmap_start = MAP_FAILED;
 	}
 
 	Bitmap *alloc_bitmap()
 	{
 		return new Bitmap(vertices);
 	}
-/**
- * @brief stream的方式遍历Graph里所有的vertex。若未使用bitmap并且graph的vertex占用的字节大小大于memory budget，则使用batch的方式处理。
- * 
- * @tparam T 
- * @param process stream过程的主逻辑function
- * @param bitmap 用于优化stream过程，若某个vertex id不在bitmap里则直接跳过stream过程。bitmap==null时，不进行优化。
- * @param zero 
- * @param pre batch逻辑的pre钩子function，一次batch开始前会调用。
- * @param post batch逻辑的post钩子function，一次batch结束后会调用。
- * @return T 
- */
+	/**
+	 * @brief stream的方式遍历Graph里所有的vertex。若未使用bitmap并且graph的vertex占用的字节大小大于memory budget，则使用batch的方式处理。
+	 *
+	 * @tparam T
+	 * @param process stream过程的主逻辑function
+	 * @param bitmap 用于优化stream过程，若某个vertex id不在bitmap里则直接跳过stream过程。bitmap==null时，不进行优化。
+	 * @param zero
+	 * @param pre batch逻辑的pre钩子function，一次batch开始前会调用。
+	 * @param post batch逻辑的post钩子function，一次batch结束后会调用。
+	 * @return T
+	 */
 	template <typename T>
 	T stream_vertices(std::function<T(VertexId)> process, Bitmap *bitmap = nullptr, T zero = 0,
 					  std::function<void(std::pair<VertexId, VertexId>)> pre = f_none_1,
@@ -215,7 +218,7 @@ public:
 			}
 		}
 		else
-		{//这个else唯一的差异在于，
+		{ //这个else唯一的差异在于，
 #pragma omp parallel for schedule(dynamic) num_threads(parallelism)
 			for (int partition_id = 0; partition_id < partitions; partition_id++)
 			{
@@ -370,7 +373,7 @@ public:
 		switch (update_mode)
 		{
 		case 0: // source oriented update
-			{
+		{
 			threads.clear();
 			for (int ti = 0; ti < parallelism; ti++)
 			{
@@ -458,33 +461,35 @@ public:
 			{
 				threads[i].join();
 			}
-			}
-			break;
+		}
+		break;
 			//这个1是默认模式，也是bfs使用的模式
 		case 1: // target oriented update
+		{
+			if (column_mmap_start == MAP_FAILED)
 			{
-			fin = open((path + "/column").c_str(), read_mode);
-			// posix_fadvise(fin, 0, 0, POSIX_FADV_SEQUENTIAL);
-			void *mmap_start = MAP_FAILED;
-			if (fin != -1)
-			{
-				struct stat s;
-				int status = fstat(fin, &s);
-				if (status != 0)
+				fin = open((path + "/column").c_str(), read_mode);
+				// posix_fadvise(fin, 0, 0, POSIX_FADV_SEQUENTIAL);
+				if (fin != -1)
 				{
-					printf("Value of errno: %d\n", errno);
-					printf("Error state the file: %s\n", strerror(errno));
-					return -1;
-				}
-				size_t size = s.st_size;
-				//这是我们用mmap的方式改造了他原生的代码。
-				mmap_start = mmap(0, size, PROT_READ, MAP_PRIVATE, fin, 0);
-				if (mmap_start == MAP_FAILED)
-				{
-					printf("mmap failed!\n");
-					printf("Value of errno: %d\n", errno);
-					printf("Error mapping the file: %s\n", strerror(errno));
-					return -1;
+					struct stat s;
+					int status = fstat(fin, &s);
+					if (status != 0)
+					{
+						printf("Value of errno: %d\n", errno);
+						printf("Error state the file: %s\n", strerror(errno));
+						return -1;
+					}
+					size_t size = s.st_size;
+					//这是我们用mmap的方式改造了他原生的代码。
+					column_mmap_start = mmap(0, size, PROT_READ, MAP_PRIVATE, fin, 0);
+					if (column_mmap_start == MAP_FAILED)
+					{
+						printf("mmap failed!\n");
+						printf("Value of errno: %d\n", errno);
+						printf("Error mapping the file: %s\n", strerror(errno));
+						return -1;
+					}
 				}
 			}
 			//以batch的方式遍历partitions
@@ -545,7 +550,7 @@ public:
 										 ti);
 				}
 				offset = 0;
-				//TODO:这里的逻辑没有细看，不过大致意思就是根据各个offset划分出对应的文件区段，然后推入到tasks这个Queue的实例里，让上面的线程从里面取出来读取文件内容。
+				// TODO:这里的逻辑没有细看，不过大致意思就是根据各个offset划分出对应的文件区段，然后推入到tasks这个Queue的实例里，让上面的线程从里面取出来读取文件内容。
 				for (int j = 0; j < partitions; j++)
 				{
 					for (int i = cur_partition; i < cur_partition + partition_batch; i++)
@@ -554,8 +559,8 @@ public:
 							break;
 						if (!should_access_shard[i])
 							continue;
-						//column_offset是一个long *类型，本质就是一个数组。从这里推测，是获取一个partition的column在一个Grid里的begin_offset和end_offset
-						//TODO:有时间研究下它的细节，没有就先推进
+						// column_offset是一个long *类型，本质就是一个数组。从这里推测，是获取一个partition的column在一个Grid里的begin_offset和end_offset
+						// TODO:有时间研究下它的细节，没有就先推进
 						long begin_offset = column_offset[j * partitions + i];
 						if (begin_offset - offset >= PAGESIZE)
 						{
@@ -567,12 +572,12 @@ public:
 						//顺着这个column遍历整个partition。
 						while (end_offset - offset >= IOSIZE)
 						{
-							tasks.push(std::make_tuple(mmap_start, offset, IOSIZE));
+							tasks.push(std::make_tuple(column_mmap_start, offset, IOSIZE));
 							offset += IOSIZE;
 						}
 						if (end_offset > offset)
 						{
-							tasks.push(std::make_tuple(mmap_start, offset, (end_offset - offset + PAGESIZE - 1) / PAGESIZE * PAGESIZE));
+							tasks.push(std::make_tuple(column_mmap_start, offset, (end_offset - offset + PAGESIZE - 1) / PAGESIZE * PAGESIZE));
 							offset += (end_offset - offset + PAGESIZE - 1) / PAGESIZE * PAGESIZE;
 						}
 					}
@@ -588,8 +593,8 @@ public:
 				post_source_window(std::make_pair(begin_vid, end_vid));
 				// printf("post %d %d\n", begin_vid, end_vid);
 			}
-			}
-			break;
+		}
+		break;
 		default:
 			assert(false);
 		}

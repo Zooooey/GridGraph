@@ -35,13 +35,14 @@ int main(int argc, char ** argv) {
 	active_in->print_address();
 	active_out->print_address();
 	BigVector<VertexId> parent(graph.path+"/parent", graph.vertices);
-	parent.print_address("parent");
+	
 	graph.set_vertex_data_bytes( graph.vertices * sizeof(VertexId) );
 
 	//这里在初始化bitmap还有parent
 	active_out->clear();
 	active_out->set_bit(start_vid);
 	parent.fill(-1);
+	parent.print_address("parent");
 	parent[start_vid] = start_vid;
 	VertexId active_vertices = 1;
 
